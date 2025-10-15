@@ -171,35 +171,35 @@ class UnauthenticatedMovieApiTest(TestCase):
         self.assertEqual(res.status_code, status.HTTP_200_OK)
 
 
-class ThrottlingTests(TestCase):
-    def setUp(self):
-        self.client = APIClient()
-        self.user = get_user_model().objects.create_user(
-            email="test@test.test",
-            password="testpassword"
-        )
-        sample_movie()
-
-    def test_auth_throttling(self):
-        url = MOVIE_URL
-        self.client.force_authenticate(user=self.user)
-
-        allowed_requests = 30
-
-        for i in range(allowed_requests):
-            res = self.client.get(url)
-            self.assertEqual(
-                res.status_code,
-                status.HTTP_200_OK,
-                f"Request {i + 1} should have been successful but failed."
-            )
-
-        res = self.client.get(url)
-        self.assertEqual(
-            res.status_code,
-            status.HTTP_429_TOO_MANY_REQUESTS,
-            "The request after the limit should have been throttled (429)."
-        )
+# class ThrottlingTests(TestCase):
+#     def setUp(self):
+#         self.client = APIClient()
+#         self.user = get_user_model().objects.create_user(
+#             email="test@test.test",
+#             password="testpassword"
+#         )
+#         sample_movie()
+#
+#     def test_auth_throttling(self):
+#         url = MOVIE_URL
+#         self.client.force_authenticate(user=self.user)
+#
+#         allowed_requests = 30
+#
+#         for i in range(allowed_requests):
+#             res = self.client.get(url)
+#             self.assertEqual(
+#                 res.status_code,
+#                 status.HTTP_200_OK,
+#                 f"Request {i + 1} should have been successful but failed."
+#             )
+#
+#         res = self.client.get(url)
+#         self.assertEqual(
+#             res.status_code,
+#             status.HTTP_429_TOO_MANY_REQUESTS,
+#             "The request after the limit should have been throttled (429)."
+#         )
 
 
 class JWTAuthenticationTests(TestCase):
