@@ -164,10 +164,79 @@ class UnauthenticatedMovieApiTest(TestCase):
 
     def setUp(self):
         self.client = APIClient()
+        sample_movie()
 
     def test_auth_required(self):
         res = self.client.get(MOVIE_URL)
-        self.assertEqual(res.status_code, status.HTTP_401_UNAUTHORIZED)
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+
+
+class ThrottlingTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.user = get_user_model().objects.create_user(
+            email="test@test.test",
+            password="testpassword"
+        )
+        sample_movie()
+
+    def test_auth_throttling(self):
+        url = MOVIE_URL
+        self.client.force_authenticate(user=self.user)
+
+        allowed_requests = 30
+
+        for i in range(allowed_requests):
+            res = self.client.get(url)
+            self.assertEqual(
+                res.status_code,
+                status.HTTP_200_OK,
+                f"Request {i + 1} should have been successful but failed."
+            )
+
+        res = self.client.get(url)
+        self.assertEqual(
+            res.status_code,
+            status.HTTP_429_TOO_MANY_REQUESTS,
+            "The request after the limit should have been throttled (429)."
+        )
+
+
+class JWTAuthenticationTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.user = get_user_model().objects.create_user(
+            email="test@test.test",
+            password="password"
+        )
+        self.token_url = "/api/user/token/"
+        sample_movie()
+
+    def test_token_obtain_success(self):
+        payload = {
+            "email": "test@test.test",
+            "password": "password"
+        }
+        res = self.client.post(self.token_url, payload)
+
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        self.assertIn("access", res.data)
+        self.assertIn("refresh", res.data)
+
+    def test_auth_with_jwt(self):
+        payload = {
+            "email": "test@test.test",
+            "password": "password"
+        }
+        res = self.client.post(self.token_url, payload)
+        access_token = res.data["access"]
+
+        auth_client = APIClient()
+        auth_client.credentials(HTTP_AUTHORIZATION=f"Bearer {access_token}")
+
+        res_auth = auth_client.get(MOVIE_URL)
+
+        self.assertEqual(res_auth.status_code, status.HTTP_200_OK)
 
 
 class AuthenticatedMovieApiTest(TestCase):
@@ -180,26 +249,47 @@ class AuthenticatedMovieApiTest(TestCase):
         )
         self.client.force_authenticate(self.user)
 
+    def test_filter_movie_by_title(self):
+        movie1 = sample_movie(title="The Terminator")
+        sample_movie(title="Avatar")
+
+        res = self.client.get(MOVIE_URL, {"title": "Termin"})
+
+        serializer = MovieListSerializer(movie1)
+        self.assertEqual(len(res.data), 1)
+        self.assertEqual(res.data[0]["title"], serializer.data["title"])
+
+    def test_filter_movie_by_genres(self):
+        genre_action = sample_genre(name="Action")
+        genre_comedy = sample_genre(name="Comedy")
+
+        movie1 = sample_movie(title="Action Film")
+        movie2 = sample_movie(title="Comedy Film")
+
+        movie1.genres.add(genre_action)
+        movie2.genres.add(genre_comedy)
+
+        res = self.client.get(MOVIE_URL, {"genres": f"{genre_action.id},{genre_comedy.id}"})
+        self.assertEqual(len(res.data), 2)
+
     def test_movie_list(self):
         sample_movie()
         movie_with_genre = sample_movie()
         movie_with_actors = sample_movie()
 
-
-
         genre_1 = Genre.objects.create(name="Drama")
         actor_1 = Actor.objects.create(first_name="George", last_name="Clooney")
-
-
 
         movie_with_genre.genres.add(genre_1)
         movie_with_actors.actors.add(actor_1)
 
         res = self.client.get(MOVIE_URL)
-        movies = Movie.objects.all()
+
+        movies = Movie.objects.all().order_by("id")
         serializer = MovieListSerializer(movies, many=True)
 
         self.assertEqual(res.status_code, status.HTTP_200_OK)
+
         self.assertEqual(res.data, serializer.data)
 
     def test_create_movie_forbidden(self):
@@ -207,7 +297,6 @@ class AuthenticatedMovieApiTest(TestCase):
             "title": "Harry Potter",
             "description": "Harry Potter description",
             "duration": 170,
-
         }
 
         res = self.client.post(MOVIE_URL, payload)
